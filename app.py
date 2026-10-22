@@ -22,9 +22,8 @@ st.title("🚲 Bike Rental Demand Prediction")
 st.caption("Explore the dataset, clean the data, visualize rental patterns, and evaluate a regression model.")
 
 NUMERIC_COLUMNS = [
-    "season", "yr", "mnth", "hr", "holiday", "weekday", "workingday",
-    "weathersit", "temp", "atemp", "hum", "windspeed", "casual",
-    "registered", "cnt",
+    "yr", "mnth", "hr", "weekday", "temp", "atemp", "hum",
+    "windspeed", "casual", "registered", "cnt",
 ]
 MODEL_FEATURES = [
     "season", "yr", "mnth", "hr", "holiday", "weekday", "workingday",
@@ -44,32 +43,51 @@ def load_data(uploaded_file):
 
 
 def clean_data(raw_df):
-    """Return a cleaned copy while keeping date parsing separate."""
+    """Clean a copy of the uploaded bike-sharing data."""
     data = raw_df.copy()
     data.columns = data.columns.astype(str).str.strip()
 
-    # Treat question marks as missing values, as in the original notebook.
+    # Treat question marks as missing values.
     data = data.replace(r"^\s*\?\s*$", np.nan, regex=True)
 
-    # Convert only columns that actually exist in this CSV.
+    # The uploaded dataset stores some categories as words, not numbers.
+    # Map those labels before numeric conversion; otherwise every value
+    # becomes NaN and dropna() removes every row.
+    category_maps = {
+        "season": {
+            "springer": 1, "spring": 1, "summer": 2, "fall": 3, "winter": 4,
+        },
+        "holiday": {"No": 0, "Yes": 1},
+        "workingday": {"No work": 0, "Working Day": 1, "Working day": 1},
+        "weathersit": {
+            "Clear": 1, "Mist": 2, "Light Snow": 3, "Heavy Rain": 4,
+        },
+    }
+    for column, mapping in category_maps.items():
+        if column in data.columns:
+            # Keep already-numeric category values numeric, and map text labels.
+            mapped = data[column].astype(str).str.strip().map(mapping)
+            numeric_existing = pd.to_numeric(data[column], errors="coerce")
+            data[column] = mapped.where(mapped.notna(), numeric_existing)
+
     for column in NUMERIC_COLUMNS:
         if column in data.columns:
             data[column] = pd.to_numeric(data[column], errors="coerce")
 
     before = len(data)
-    data = data.dropna().copy()
-    dropped = before - len(data)
 
-    # Parse dates without dropping otherwise useful rows from the modeling data.
+    # Convert dates using the source dataset's day-month-year format.
     invalid_dates = 0
     if "dteday" in data.columns:
-        try:
-            data["dteday"] = pd.to_datetime(
-                data["dteday"], errors="coerce", format="mixed"
-            )
-        except (TypeError, ValueError):
-            data["dteday"] = pd.to_datetime(data["dteday"], errors="coerce")
+        original_dates = data["dteday"].copy()
+        data["dteday"] = pd.to_datetime(
+            original_dates, format="%d-%m-%Y", errors="coerce"
+        )
         invalid_dates = int(data["dteday"].isna().sum())
+
+    # Remove rows with missing values after category and numeric conversion.
+    data = data.dropna().copy()
+    dropped = before - len(data)
 
     return data, before, dropped, invalid_dates
 
